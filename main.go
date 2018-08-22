@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/fatih/color"
+	"github.com/fujiwara/shapeio"
 )
 
 type Endpoint struct {
@@ -34,6 +37,7 @@ func (slowPipe *SlowPipe) Start() error {
 	defer listener.Close()
 	fmt.Printf("Established Listener\n")
 
+	// Accept each connection and handle it
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -52,17 +56,28 @@ func (slowPipe *SlowPipe) forward(local net.Conn) {
 		return
 	}
 
-	copyConn := func(writer, reader net.Conn, label string) {
-		bytes, err := io.Copy(writer, reader)
-		if err != nil {
-			fmt.Printf("Data transfer error %s: %s", label, err)
-			return
+	copyConn := func(writer io.Writer, reader io.Reader, label string) {
+		for {
+			bytes, err := io.Copy(writer, reader)
+			if err != nil {
+				fmt.Printf("Data transfer error %s: %s", label, err)
+				return
+			}
+
+			if 0 != bytes {
+				fmt.Printf("Data transfer %s %d bytes\n", label, bytes)
+			}
 		}
-		fmt.Printf("Data transfer %s %d bytes\n", label, bytes)
 	}
 
-	go copyConn(local, remote, "\u2b06")
-	go copyConn(remote, local, "\u2b07")
+	localreader := shapeio.NewReader(local)
+	localreader.SetRateLimit(float64(slowPipe.Rate))
+
+	localwriter := shapeio.NewWriter(local)
+	localwriter.SetRateLimit(float64(slowPipe.Rate))
+
+	go copyConn(remote, localreader, "\u2b07")
+	go copyConn(localwriter, remote, "\u2b06")
 }
 
 func main() {
@@ -78,7 +93,7 @@ func main() {
 		done <- true
 	}()
 
-	// colorize(color.FgGreen, "=> Reading Config")
+	colorize(color.FgGreen, "=> Reading Config")
 
 	const (
 		defaultListenPort       = 9090
@@ -95,9 +110,9 @@ func main() {
 
 	flag.Parse()
 
-	// colorize(color.FgCyan, "Listen: ", *listenPort)
-	// colorize(color.FgCyan, "Target: ", *targetPort)
-	// colorize(color.FgCyan, "Rate: ", *bytesPerSec)
+	colorize(color.FgCyan, "Listen: ", *listenPort)
+	colorize(color.FgCyan, "Target: ", *targetPort)
+	colorize(color.FgCyan, "Rate: ", *bytesPerSec)
 
 	slowPipe := &SlowPipe{
 		Local:  &Endpoint{Host: "localhost", Port: *listenPort},
